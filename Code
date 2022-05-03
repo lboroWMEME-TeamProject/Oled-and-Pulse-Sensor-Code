@@ -1,49 +1,116 @@
-#define OLED_Address 0x3C
-Adafruit_SSD1306 oled(1);
- 
-int x=0;
-int lastx=0;
-int lasty=0;
-int LastTime=0;
-bool BPMTiming=false;
-bool BeatComplete=false;
-int LastTime=0;
-int BPM=0;
- 
-#define UpperThreshold 550
-#define LowerThreshold 500
- 
-void setup() {
-  Serial.begin(9600);
-}
- 
- 
-void loop() 
+//------------------------------------------------------------------------//Including Required Libraries
+#include <Wire.h>
+#include "MAX30100_PulseOximeter.h"
+#include "MAX30100.h"
+#include <U8g2lib.h>
+//------------------------------------------------------------------------//Defining Specific variables for Pulse Oximiter Sensors
+#define REPORTING_PERIOD_MS      1000
+#define PULSE_WIDTH              MAX30100_SPC_PW_1600US_16BITS
+#define IR_LED_CURRENT           MAX30100_LED_CURR_40MA  
+#define LED_CURRENT              MAX30100_LED_CURR_20_8MA 
+#define SAMPLING_RATE            MAX30100_SAMPRATE_100HZ
+//------------------------------------------------------------------------//Initialising the Pulse oximiter and Oled
+U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C u8g2(U8G2_R0);
+PulseOximeter pox;
+MAX30100 sensor;
+//------------------------------------------------------------------------//Initialising other Variables
+uint32_t tsLastReport = 0;
+uint32_t last_beat=0;
+bool initialized=false;
+int HRclean;
+int SpO2;
+//------------------------------------------------------------------------//Code to set up the OLED display using the U8g2 library.
+ void onBeatDetected()
 {
- 
-  int value=analogRead(0);
-  // calc bpm
-  
-  if(value>UpperThreshold)
-  {
-    if(BeatComplete)
-    {
-      BPM=millis()-LastTime;
-      BPM=int(60/(float(BPM)/1000));
-      BPMTiming=false;
-      BeatComplete=false;
-    }
-    if(BPMTiming==false)
-    {
-      LastTime=millis();
-      BPMTiming=true;
-    }
-  }
-  if((value<LowerThreshold)&(BPMTiming))
-    BeatComplete=true;
-    // output bpm to serial monitor
-  Serial.print(BPM);
-  Serial.println(" BPM");
-  delay(1000);
+  show_beat();
+  last_beat=millis();
 }
-© 2022 GitHub, Inc.
+
+void show_beat() 
+{
+  u8g2.setFont(u8g2_font_cursor_tr);
+  u8g2.setCursor(118,10);
+  u8g2.print("_");
+  u8g2.sendBuffer();
+}
+//Displays team logo at start of initialisation, after clearing buffer so no prior readings from previous use are displayes and misinterpreted.
+void initial_display() 
+{
+  if (not initialized) 
+  {
+    u8g2.clearBuffer();
+    u8g2.setCursor(15,12);
+    u8g2.setFont(u8g2_font_crox2hb_tr); 
+    u8g2.print("Team BBB");             
+    u8g2.setFont(u8g2_font_crox2h_tr);
+    u8g2.setCursor(30,29);
+    u8g2.print("Initializing...");
+    u8g2.sendBuffer(); 
+    delay(4000);
+   
+    initialized=true;
+//Checks whether the sensor is running correctly. If yes: move on in code. If no: print on oled screen that there has been a failure initialising.
+      u8g2.clearBuffer();
+      u8g2.setFont(u8g2_font_crox2hb_tr); 
+        if (!pox.begin()) {
+          u8g2.setCursor(40,12);
+          u8g2.print("FAILED");
+          u8g2.setCursor(15,29);
+          u8g2.print("Check Sensor !");
+          u8g2.sendBuffer(); 
+          for(;;);
+        } else {
+          //Displays when to wear the sensor to begin testing. in our demo this is by finger print but in the real world this will be on attached to wrist.
+          u8g2.setCursor(20,12);
+          u8g2.print("INITIALIZED");
+          u8g2.setCursor(0,29);
+          u8g2.print("Wear the Sensor...");
+          u8g2.sendBuffer(); 
+        }
+     delay(2000);
+  }
+}
+//------------------------------------------------------------------------//Setup for Pulse Oximiter
+
+void setup()
+{
+    u8g2.begin();
+    initial_display();
+    pox.begin();
+
+    pox.setOnBeatDetectedCallback(onBeatDetected); 
+    pox.setIRLedCurrent(LED_CURRENT);  
+    sensor.setMode(MAX30100_MODE_SPO2_HR);
+    sensor.setLedsPulseWidth(PULSE_WIDTH);
+    sensor.setSamplingRate(SAMPLING_RATE);
+}
+ //Displays on watch the heart rate and blood oxygen levels of person by updating the sensor at regular intervals (between time of 0 to 100 sec).
+void loop()
+{
+    pox.update();
+    HRclean = pox.getHeartRate();
+    SpO2 = pox.getSpO2();
+    if ((millis() - tsLastReport > REPORTING_PERIOD_MS) and (HRclean>30 and HRclean<220 and SpO2>30 and SpO2<100)) {
+      u8g2.clearBuffer();
+      u8g2.setFont(u8g2_font_crox2h_tr);
+      u8g2.setCursor(0,12);  
+      u8g2.print("HR");
+      u8g2.setCursor(75,12);  
+      u8g2.print("Bpm");
+      u8g2.setCursor(0,30);
+      u8g2.print("SpO2 ");
+      u8g2.setCursor(75,30);
+      u8g2.print("%"); 
+      u8g2.setFont(u8g2_font_fub11_tf); 
+      u8g2.setCursor(45,12);  
+      u8g2.print(HRclean);
+      u8g2.setCursor(45,30);  
+      u8g2.print(SpO2);
+      u8g2.setFont(u8g2_font_cursor_tr);
+      u8g2.setCursor(118,10);
+      u8g2.print("^");
+      u8g2.sendBuffer();
+
+     tsLastReport = millis();      
+    }
+}
